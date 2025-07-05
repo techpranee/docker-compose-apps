@@ -5,27 +5,27 @@ services:
     restart: always
     environment:
       # Main application URLs - configure these in Portainer environment variables
-      MAIN_URL: "${POSTIZ_MAIN_URL}"
-      FRONTEND_URL: "${POSTIZ_FRONTEND_URL}"
-      NEXT_PUBLIC_BACKEND_URL: "${POSTIZ_BACKEND_URL}"
-      JWT_SECRET: "${POSTIZ_JWT_SECRET}"
+      MAIN_URL: ${POSTIZ_MAIN_URL}
+      FRONTEND_URL: ${POSTIZ_FRONTEND_URL}
+      NEXT_PUBLIC_BACKEND_URL: ${POSTIZ_BACKEND_URL}
+      JWT_SECRET: ${POSTIZ_JWT_SECRET}
  
       # Database configuration - AWS PostgreSQL
-      DATABASE_URL: "${POSTIZ_DATABASE_URL}"
-      REDIS_URL: "${POSTIZ_REDIS_URL:-redis://postiz-redis:6379}"
-      BACKEND_INTERNAL_URL: "${POSTIZ_BACKEND_INTERNAL_URL:-http://localhost:3000}"
-      IS_GENERAL: "${POSTIZ_IS_GENERAL:-true}"
-      DISABLE_REGISTRATION: "${POSTIZ_DISABLE_REGISTRATION:-false}"
+      DATABASE_URL: ${POSTIZ_DATABASE_URL}
+      REDIS_URL: ${POSTIZ_REDIS_URL:-redis://postiz-redis:6379}
+      BACKEND_INTERNAL_URL: ${POSTIZ_BACKEND_INTERNAL_URL:-http://localhost:3000}
+      IS_GENERAL: ${POSTIZ_IS_GENERAL:-true}
+      DISABLE_REGISTRATION: ${POSTIZ_DISABLE_REGISTRATION:-false}
       
       # Storage configuration
-      STORAGE_PROVIDER: "${POSTIZ_STORAGE_PROVIDER:-local}"
-      UPLOAD_DIRECTORY: "${POSTIZ_UPLOAD_DIRECTORY:-/uploads}"
-      NEXT_PUBLIC_UPLOAD_DIRECTORY: "${POSTIZ_NEXT_PUBLIC_UPLOAD_DIRECTORY:-/uploads}"
+      STORAGE_PROVIDER: ${POSTIZ_STORAGE_PROVIDER:-local}
+      UPLOAD_DIRECTORY: ${POSTIZ_UPLOAD_DIRECTORY:-/uploads}
+      NEXT_PUBLIC_UPLOAD_DIRECTORY: ${POSTIZ_NEXT_PUBLIC_UPLOAD_DIRECTORY:-/uploads}
     volumes:
       - postiz-config:/config/
       - postiz-uploads:/uploads/
     ports:
-      - "${POSTIZ_PORT:-5000}:5000"
+      - ${POSTIZ_PORT:-5000}:5000
     networks:
       - postiz-network
     depends_on:
