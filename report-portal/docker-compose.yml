@@ -131,6 +131,9 @@ services:
       - "traefik.http.routers.traefik.service=api@internal"
       - "traefik.http.middlewares.traefik-strip.stripprefix.prefixes=/traefik"
       - "traefik.http.routers.traefik.middlewares=traefik-strip@docker"
+      - "traefik.http.middlewares.traefik-auth.basicauth.users=admin:Spearhub123"
+      - "traefik.http.routers.traefik.middlewares=traefik-strip@docker,traefik-auth@docker"
+
 
     healthcheck:
       test: ["CMD-SHELL", "wget --spider -q http://localhost:8080/ping || exit 1"]
