@@ -104,23 +104,37 @@ services:
     logging:
       <<: *logging
     ports:
-      - "8080:8080"  ## ReportPortal UI 
-      - "8081:8081"  ## Traefik dashboard
+      - "80:80"  ## ReportPortal UI 
+      - "443:443"  ## Traefik dashboard
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./letsencrypt:/letsencrypt
     command:
       - --providers.docker=true
       - --providers.docker.constraints=Label(`traefik.expose`, `true`)
-      - --entrypoints.web.address=:8080
-      - --entrypoints.traefik.address=:8081
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      # Auto HTTPS redirect
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      # TLS certs
+      - --certificatesresolvers.myresolver.acme.httpchallenge=true
+      - --certificatesresolvers.myresolver.acme.httpchallenge.entrypoint=web
+      - --certificatesresolvers.myresolver.acme.email=admin@techpranee.com
+      - --certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json
+      # Enable dashboard
       - --api.dashboard=true
-      - --api.insecure=true
+    labels:
+      - "traefik.http.routers.traefik.rule=Host(`qa.techpranee.com`) && PathPrefix(`/traefik`)"
+      - "traefik.http.routers.traefik.entrypoints=websecure"
+      - "traefik.http.routers.traefik.tls.certresolver=myresolver"
+      - "traefik.http.routers.traefik.service=api@internal"
+      - "traefik.http.middlewares.traefik-strip.stripprefix.prefixes=/traefik"
+      - "traefik.http.routers.traefik.middlewares=traefik-strip@docker"
+
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8081/api/http/routers || wget -q --spider http://localhost:8081/api/http/routers || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:8080/ping || exit 1"]
+
     networks:
       - reportportal
     restart: always
@@ -273,9 +287,11 @@ services:
       retries: 3
       start_period: 30s
     labels:
-      - "traefik.http.routers.index.rule=PathPrefix(`/`)"
-      - "traefik.http.routers.index.service=index"
+      - "traefik.http.routers.index.rule=Host(`qa.techpranee.com`)"
+      - "traefik.http.routers.index.entrypoints=websecure"
+      - "traefik.http.routers.index.tls.certresolver=myresolver"
       - "traefik.http.services.index.loadbalancer.server.port=8080"
+      - "traefik.http.routers.index.service=index"
       - "traefik.http.services.index.loadbalancer.server.scheme=http"
       - "traefik.expose=true"
     networks:
@@ -298,11 +314,13 @@ services:
       retries: 3
       start_period: 30s
     labels:
+      - "traefik.http.routers.ui.rule=Host(`qa.techpranee.com`) && PathPrefix(`/ui`)"
+      - "traefik.http.routers.ui.entrypoints=websecure"
+      - "traefik.http.routers.ui.tls.certresolver=myresolver"
+      - "traefik.http.services.ui.loadbalancer.server.port=8080"
       - "traefik.http.middlewares.ui-strip-prefix.stripprefix.prefixes=/ui"
       - "traefik.http.routers.ui.middlewares=ui-strip-prefix@docker"
-      - "traefik.http.routers.ui.rule=PathPrefix(`/ui`)"
       - "traefik.http.routers.ui.service=ui"
-      - "traefik.http.services.ui.loadbalancer.server.port=8080"
       - "traefik.http.services.ui.loadbalancer.server.scheme=http"
       - "traefik.expose=true"
     networks:
@@ -362,14 +380,18 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
+
     labels:
+      - "traefik.http.routers.api.rule=Host(`qa.techpranee.com`) && PathPrefix(`/api`)"
+      - "traefik.http.routers.api.entrypoints=websecure"
+      - "traefik.http.routers.api.tls.certresolver=myresolver"
+      - "traefik.http.services.api.loadbalancer.server.port=8585"
       - "traefik.http.middlewares.api-strip-prefix.stripprefix.prefixes=/api"
       - "traefik.http.routers.api.middlewares=api-strip-prefix@docker"
-      - "traefik.http.routers.api.rule=PathPrefix(`/api`)"
       - "traefik.http.routers.api.service=api"
-      - "traefik.http.services.api.loadbalancer.server.port=8585"
       - "traefik.http.services.api.loadbalancer.server.scheme=http"
       - "traefik.expose=true"
+
     networks:
       - reportportal
     restart: always
@@ -402,11 +424,13 @@ services:
       retries: 3
       start_period: 60s
     labels:
+      - "traefik.http.routers.uat.rule=Host(`qa.techpranee.com`) && PathPrefix(`/uat`)"
+      - "traefik.http.routers.uat.entrypoints=websecure"
+      - "traefik.http.routers.uat.tls.certresolver=myresolver"
+      - "traefik.http.services.uat.loadbalancer.server.port=9999"
       - "traefik.http.middlewares.uat-strip-prefix.stripprefix.prefixes=/uat"
       - "traefik.http.routers.uat.middlewares=uat-strip-prefix@docker"
-      - "traefik.http.routers.uat.rule=PathPrefix(`/uat`)"
       - "traefik.http.routers.uat.service=uat"
-      - "traefik.http.services.uat.loadbalancer.server.port=9999"
       - "traefik.http.services.uat.loadbalancer.server.scheme=http"
       - "traefik.expose=true"
     depends_on:
@@ -467,11 +491,13 @@ services:
       retries: 3
       start_period: 60s
     labels:
+      - "traefik.http.routers.jobs.rule=Host(`qa.techpranee.com`) && PathPrefix(`/jobs`)"
+      - "traefik.http.routers.jobs.entrypoints=websecure"
+      - "traefik.http.routers.jobs.tls.certresolver=myresolver"
+      - "traefik.http.services.jobs.loadbalancer.server.port=8686"
       - traefik.http.middlewares.jobs-strip-prefix.stripprefix.prefixes=/jobs
       - traefik.http.routers.jobs.middlewares=jobs-strip-prefix@docker
-      - traefik.http.routers.jobs.rule=PathPrefix(`/jobs`)
       - traefik.http.routers.jobs.service=jobs
-      - traefik.http.services.jobs.loadbalancer.server.port=8686
       - traefik.http.services.jobs.loadbalancer.server.scheme=http
       - traefik.expose=true
     networks:
@@ -519,6 +545,7 @@ volumes:
   opensearch:
   storage:
   postgres:
+  letsencrypt:
 
 ## @section Networks
 ## Custom Docker network for ReportPortal service discovery
