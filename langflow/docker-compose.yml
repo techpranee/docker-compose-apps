@@ -1,0 +1,25 @@
+version: "3.9"
+
+services:
+  langflow:
+    image: langflowai/langflow:latest
+    container_name: langflow
+    command: >
+      sh -c "pip install docling && 
+             python -m langflow run --host 0.0.0.0 --port 7860"
+    environment:
+      LANGFLOW_HOST: "0.0.0.0"
+      LANGFLOW_PORT: "7860"
+      LANGFLOW_DATABASE_URL: "postgresql://postgres:techpranee@techpranee.csghg5x1e4dy.ap-south-1.rds.amazonaws.com:5432/langflow"
+      LANGFLOW_LOG_LEVEL: "INFO"
+      # Optional model providers
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      OLLAMA_BASE_URL: "https://ollama2.havenify.ai"
+    ports:
+      - "7860:7860"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:7860/"]
+      interval: 15s
+      timeout: 5s
+      retries: 20

@@ -1,0 +1,231 @@
+services:
+  # CopilotKit Runtime Backend
+  copilotkit-runtime:
+    image: node:18-alpine
+    container_name: copilotkit-runtime
+    restart: unless-stopped
+    ports:
+      - "9229:9229"
+    working_dir: /app
+    environment:
+      # Basic configuration
+      - NODE_ENV=${NODE_ENV:-production}
+      - PORT=${PORT:-9229}
+      - HOST=${HOST:-0.0.0.0}
+      
+      # Hosted Ollama Configuration
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-deepseek-r1:14b}
+      - LLM_PROVIDER=${LLM_PROVIDER:-ollama}
+      
+      # OpenAI API Key (required by CopilotKit even for Ollama)
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-ollama-placeholder}
+      
+      # Database configuration
+      - DATABASE_URL=${DATABASE_URL}
+      
+      # Redis for caching and session management
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-copilotkit}@redis:6379
+      
+      # CORS settings
+      - CORS_ORIGIN=${CORS_ORIGIN:-*}
+      
+      # Authentication
+      - JWT_SECRET=${JWT_SECRET}
+      
+      # Logging
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      
+      # WebSocket configuration
+      - WS_ENABLED=${WS_ENABLED:-true}
+      
+      # Stateless configuration - no persistent volumes
+      - EPHEMERAL_STORAGE=${EPHEMERAL_STORAGE:-true}
+      
+    command:
+      - sh
+      - -c
+      - |
+        echo "🔧 Installing system dependencies..."
+        apk add --no-cache wget
+
+        echo "📦 Initializing npm project..."
+        npm init -y
+
+        echo "⬇️  Installing node dependencies..."
+        npm install --no-audit --no-fund @copilotkit/runtime@latest express cors dotenv
+
+        echo "📝 Creating server application..."
+        cat > server.js << 'EOF'
+        const express = require('express');
+        const cors = require('cors');
+        const { CopilotRuntime, OpenAIAdapter } = require('@copilotkit/runtime');
+
+        const app = express();
+        const port = process.env.PORT || 9229;
+
+        console.log('🔧 Initializing CopilotKit Runtime...');
+        console.log('📡 Ollama endpoint:', process.env.OLLAMA_BASE_URL);
+        console.log('🧠 Using model:', process.env.OLLAMA_MODEL);
+
+        // Middleware
+        app.use(cors({ 
+          origin: process.env.CORS_ORIGIN || '*',
+          credentials: true
+        }));
+        app.use(express.json());
+
+        // Health check endpoint
+        app.get('/health', (req, res) => {
+          res.json({ 
+            status: 'ok', 
+            timestamp: new Date().toISOString(),
+            version: '1.0.0',
+            service: 'CopilotKit Runtime',
+            ollama_endpoint: process.env.OLLAMA_BASE_URL,
+            model: process.env.OLLAMA_MODEL
+          });
+        });
+
+        // Root endpoint
+        app.get('/', (req, res) => {
+          res.json({
+            service: 'CopilotKit Runtime',
+            status: 'running',
+            endpoints: {
+              health: '/health',
+              copilotkit: '/api/copilotkit'
+            }
+          });
+        });
+
+        // Configure the OpenAI adapter for Ollama
+        const serviceAdapter = new OpenAIAdapter({
+          model: process.env.OLLAMA_MODEL || 'deepseek-r1:14b',
+          baseURL: process.env.OLLAMA_BASE_URL,
+          apiKey: 'ollama'
+        });
+
+        // CopilotKit runtime endpoint
+        const runtime = new CopilotRuntime();
+        app.all('/api/copilotkit', async (req, res) => {
+          try {
+            const response = await runtime.response({
+              body: req.body,
+              request: req,
+              response: res,
+              serviceAdapter: serviceAdapter,
+            });
+            return response;
+          } catch (error) {
+            console.error('❌ CopilotKit runtime error:', error);
+            return res.status(500).json({ 
+              error: 'Runtime error', 
+              message: error.message 
+            });
+          }
+        });
+
+        // Error handling
+        app.use((err, req, res, next) => {
+          console.error('❌ Error:', err);
+          res.status(500).json({ error: 'Internal Server Error', message: err.message });
+        });
+
+        // 404 handler
+        app.use((req, res) => {
+          res.status(404).json({ error: 'Not Found', path: req.path });
+        });
+
+        // Start server
+        const server = app.listen(port, '0.0.0.0', () => {
+          console.log('🚀 CopilotKit Runtime listening on port ' + port);
+          console.log('📊 Health check: http://localhost:' + port + '/health');
+          console.log('🤖 CopilotKit API: http://localhost:' + port + '/api/copilotkit');
+          console.log('🎯 Ollama endpoint: ' + process.env.OLLAMA_BASE_URL);
+          console.log('🧠 Using model: ' + (process.env.OLLAMA_MODEL || 'deepseek-r1:14b'));
+        });
+
+        // Graceful shutdown
+        process.on('SIGTERM', () => {
+          console.log('SIGTERM received, shutting down gracefully');
+          server.close(() => process.exit(0));
+        });
+
+        process.on('SIGINT', () => {
+          console.log('SIGINT received, shutting down gracefully');
+          server.close(() => process.exit(0));
+        });
+        EOF
+
+        echo "🚀 Starting CopilotKit Runtime..."
+        node server.js
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - copilotkit-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9229/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 90s
+      retries: 3
+
+  # Redis for caching and session management
+  redis:
+    image: redis:7-alpine
+    container_name: copilotkit-redis
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-copilotkit}
+    volumes:
+      - redis-data:/data
+    networks:
+      - copilotkit-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Optional: Web UI for database management (Adminer) - for RDS management
+  adminer:
+    image: adminer:latest
+    container_name: copilotkit-adminer
+    restart: unless-stopped
+    ports:
+      - "8081:8080"
+    environment:
+      - ADMINER_DEFAULT_SERVER=${RDS_HOST}
+      - ADMINER_DEFAULT_DB_DRIVER=${RDS_DB_DRIVER:-pgsql}
+      - ADMINER_DEFAULT_DB_HOST=${RDS_HOST}
+    networks:
+      - copilotkit-network
+    profiles:
+      - tools
+
+  # Optional: Redis Commander for Redis management
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: copilotkit-redis-commander
+    restart: unless-stopped
+    ports:
+      - "8082:8081"
+    environment:
+      - REDIS_HOSTS=local:redis:6379:0:${REDIS_PASSWORD:-copilotkit}
+    depends_on:
+      - redis
+    networks:
+      - copilotkit-network
+    profiles:
+      - tools
+
+networks:
+  copilotkit-network:
+    driver: bridge
+
+volumes:
+  redis-data:
+    driver: local

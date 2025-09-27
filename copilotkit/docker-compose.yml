@@ -1,0 +1,112 @@
+services:
+  # CopilotKit Runtime Backend
+  copilotkit-runtime:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: copilotkit-runtime
+    restart: unless-stopped
+    ports:
+      - "9229:9229"
+    environment:
+      # Basic configuration
+      - NODE_ENV=production
+      - PORT=9229
+      - HOST=0.0.0.0
+      
+      # Hosted Ollama Configuration
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-deepseek-r1:14b}
+      - LLM_PROVIDER=ollama
+      
+      # OpenAI API Key (required by CopilotKit even for Ollama)
+      - OPENAI_API_KEY=ollama-placeholder
+      
+      # Database configuration (using hosted RDS)
+      - DATABASE_URL=${DATABASE_URL}
+      
+      # Redis for caching and session management
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-copilotkit}@redis:6379
+      
+      # CORS settings
+      - CORS_ORIGIN=${CORS_ORIGIN:-*}
+      
+      # Authentication (optional)
+      - JWT_SECRET=${JWT_SECRET:-your-super-secret-jwt-key-change-this}
+      
+      # Logging
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      
+      # WebSocket configuration
+      - WS_ENABLED=true
+      
+      # Stateless configuration - no persistent volumes
+      - EPHEMERAL_STORAGE=true
+      
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - copilotkit-network
+
+  # Redis for caching and session management
+  redis:
+    image: redis:7-alpine
+    container_name: copilotkit-redis
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-copilotkit}
+    volumes:
+      - redis-data:/data
+    networks:
+      - copilotkit-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Nginx reverse proxy (removed - using Nginx Proxy Manager instead)
+
+  # Optional: Web UI for database management (Adminer) - for RDS management
+  adminer:
+    image: adminer:latest
+    container_name: copilotkit-adminer
+    restart: unless-stopped
+    ports:
+      - "8081:8080"
+    environment:
+      - ADMINER_DEFAULT_SERVER=${RDS_HOST:-techpranee.csghg5x1e4dy.ap-south-1.rds.amazonaws.com}
+      # Optional: Pre-fill login credentials (remove if you prefer manual login)
+      - ADMINER_DEFAULT_DB_DRIVER=pgsql
+      - ADMINER_DEFAULT_DB_HOST=${RDS_HOST:-techpranee.csghg5x1e4dy.ap-south-1.rds.amazonaws.com}
+    networks:
+      - copilotkit-network
+    profiles:
+      - tools
+
+  # Optional: Redis Commander for Redis management
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: copilotkit-redis-commander
+    restart: unless-stopped
+    ports:
+      - "8082:8081"
+    environment:
+      - REDIS_HOSTS=local:redis:6379:0:${REDIS_PASSWORD:-copilotkit}
+    depends_on:
+      - redis
+    networks:
+      - copilotkit-network
+    profiles:
+      - tools
+
+networks:
+  copilotkit-network:
+    driver: bridge
+
+volumes:
+  redis-data:
+    driver: local
+  # Removed copilotkit-data and ollama-data for stateless operation
