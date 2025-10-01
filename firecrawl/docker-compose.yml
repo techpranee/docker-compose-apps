@@ -1,0 +1,177 @@
+name: firecrawl
+
+x-firecrawl-env: &firecrawl-env
+  ENV: ${FIRECRAWL_ENV:-production}
+  HOST: 0.0.0.0
+  PORT: ${FIRECRAWL_INTERNAL_PORT:-3002}
+  WORKER_PORT: ${FIRECRAWL_WORKER_PORT:-3005}
+  PLAYWRIGHT_MICROSERVICE_URL: http://playwright-service:3000/scrape
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+  REDIS_RATE_LIMIT_URL: ${REDIS_RATE_LIMIT_URL:-redis://redis:6379}
+  NUQ_DATABASE_URL: ${NUQ_DATABASE_URL:?Set NUQ_DATABASE_URL to your managed Postgres connection string}
+  NUQ_DATABASE_URL_LISTEN: ${NUQ_DATABASE_URL_LISTEN:?Set NUQ_DATABASE_URL_LISTEN (often same as NUQ_DATABASE_URL)}
+  USE_DB_AUTHENTICATION: ${USE_DB_AUTHENTICATION:-false}
+  NUM_WORKERS_PER_QUEUE: ${NUM_WORKERS_PER_QUEUE:-8}
+  OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  MODEL_NAME: ${MODEL_NAME:-}
+  MODEL_EMBEDDING_NAME: ${MODEL_EMBEDDING_NAME:-}
+  OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
+  BULL_AUTH_KEY: ${BULL_AUTH_KEY:-CHANGEME}
+  LOGGING_LEVEL: ${LOGGING_LEVEL:-info}
+  SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+  TEST_API_KEY: ${TEST_API_KEY:-}
+  SERPER_API_KEY: ${SERPER_API_KEY:-}
+  SEARCHAPI_API_KEY: ${SEARCHAPI_API_KEY:-}
+  SELF_HOSTED_WEBHOOK_URL: ${SELF_HOSTED_WEBHOOK_URL:-}
+  SELF_HOSTED_WEBHOOK_HMAC_SECRET: ${SELF_HOSTED_WEBHOOK_HMAC_SECRET:-}
+  SUPABASE_ANON_TOKEN: ${SUPABASE_ANON_TOKEN:-}
+  SUPABASE_URL: ${SUPABASE_URL:-}
+  SUPABASE_SERVICE_TOKEN: ${SUPABASE_SERVICE_TOKEN:-}
+  POSTHOG_API_KEY: ${POSTHOG_API_KEY:-}
+  POSTHOG_HOST: ${POSTHOG_HOST:-}
+  PROXY_SERVER: ${PROXY_SERVER:-}
+  PROXY_USERNAME: ${PROXY_USERNAME:-}
+  PROXY_PASSWORD: ${PROXY_PASSWORD:-}
+  BLOCK_MEDIA: ${BLOCK_MEDIA:-false}
+
+x-firecrawl-service: &firecrawl-service
+  image: ghcr.io/firecrawl/firecrawl:latest
+  restart: unless-stopped
+  environment:
+    <<: *firecrawl-env
+  networks:
+    - backend
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  ulimits:
+    nofile:
+      soft: 65535
+      hard: 65535
+
+services:
+  api:
+    <<: *firecrawl-service
+    depends_on:
+      playwright-service:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "${FIRECRAWL_HTTP_PORT:-3002}:${FIRECRAWL_INTERNAL_PORT:-3002}"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          node -e "const url = 'http://127.0.0.1:${FIRECRAWL_INTERNAL_PORT:-3002}/v0/health/liveness'; fetch(url).then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1));"
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+  queue-worker:
+    <<: *firecrawl-service
+    depends_on:
+      redis:
+        condition: service_healthy
+    command:
+      - node
+      - --import
+      - ./dist/src/otel.js
+      - dist/src/services/queue-worker.js
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          node -e "const url = 'http://127.0.0.1:${FIRECRAWL_WORKER_PORT:-3005}/liveness'; fetch(url).then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1));"
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  nuq-worker:
+    <<: *firecrawl-service
+    command:
+      - node
+      - --import
+      - ./dist/src/otel.js
+      - dist/src/services/worker/nuq-worker.js
+    environment:
+      <<: *firecrawl-env
+      NUQ_WORKER_PORT: ${NUQ_WORKER_PORT:-3006}
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          node -e "const url = 'http://127.0.0.1:${NUQ_WORKER_PORT:-3006}/health'; fetch(url).then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1));"
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  nuq-prefetch-worker:
+    <<: *firecrawl-service
+    profiles:
+      - rabbitmq
+    command:
+      - node
+      - --import
+      - ./dist/src/otel.js
+      - dist/src/services/worker/nuq-prefetch-worker.js
+    environment:
+      <<: *firecrawl-env
+      NUQ_PREFETCH_WORKER_PORT: ${NUQ_PREFETCH_WORKER_PORT:-3011}
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          node -e "const url = 'http://127.0.0.1:${NUQ_PREFETCH_WORKER_PORT:-3011}/health'; fetch(url).then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1));"
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  playwright-service:
+    image: ghcr.io/firecrawl/playwright-service:latest
+    restart: unless-stopped
+    networks:
+      - backend
+    environment:
+      PORT: 3000
+      PROXY_SERVER: ${PROXY_SERVER:-}
+      PROXY_USERNAME: ${PROXY_USERNAME:-}
+      PROXY_PASSWORD: ${PROXY_PASSWORD:-}
+      BLOCK_MEDIA: ${BLOCK_MEDIA:-false}
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          node -e "const url = 'http://127.0.0.1:3000/health'; fetch(url).then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1));"
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    networks:
+      - backend
+    command: >-
+      redis-server --save 60 100 --loglevel warning --appendonly yes
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - redis-cli ping | grep PONG
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  redis-data:
+
+networks:
+  backend:
+    driver: bridge
