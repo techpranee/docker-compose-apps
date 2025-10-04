@@ -1,0 +1,56 @@
+# All LISTMONK_* env variables also support the LISTMONK_*_FILE pattern for loading secrets from files with Docker secrets and Podman
+# eg: LISTMONK_ADMIN_USER -> LISTMONK_ADMIN_USER_FILE=/path/to/file_with_value
+
+services:
+  # listmonk app
+  app:
+    image: listmonk/listmonk:latest
+    container_name: listmonk_app
+    restart: unless-stopped
+    ports:
+      - "9000:9000"                                           # To change the externally exposed port, change to: $custom_port:9000
+    networks:
+      - listmonk
+    hostname: listmonk.example.com                            # Recommend using FQDN for hostname
+
+    command: [sh, -c, "./listmonk --install --idempotent --yes --config '' && ./listmonk --upgrade --yes --config '' && ./listmonk --config ''"]
+                                                              # --config (file) param is set to empty so that listmonk only uses the env vars (below) for config.
+                                                              # --install --idempotent ensures that DB installation happens only once on an empty DB, on the first ever start.
+                                                              # --upgrade automatically runs any DB migrations when a new image is pulled.
+
+    environment:                                              # The same params as in config.toml are passed as env vars here.
+      LISTMONK_app__address: 0.0.0.0:9000
+      LISTMONK_db__user: ${DB_USER:-postgres}
+      LISTMONK_db__password: ${DB_PASSWORD}
+      LISTMONK_db__database: ${DB_NAME:-listmonk}
+      LISTMONK_db__host: ${DB_HOST}
+      LISTMONK_db__port: ${DB_PORT:-5432}
+      LISTMONK_db__ssl_mode: ${DB_SSL_MODE:-require}
+      LISTMONK_db__max_open: 25
+      LISTMONK_db__max_idle: 25
+      LISTMONK_db__max_lifetime: 300s
+      TZ: Etc/UTC
+      LISTMONK_ADMIN_USER: ${LISTMONK_ADMIN_USER:-}           # If these (optional) are set during the first `docker compose up`, then the Super Admin user is automatically created.
+      LISTMONK_ADMIN_PASSWORD: ${LISTMONK_ADMIN_PASSWORD:-}   # Otherwise, the user can be setup on the web app after the first visit to http://localhost:9000
+      
+      # S3 Media Storage Configuration
+      LISTMONK_upload__provider: ${LISTMONK_upload__provider:-filesystem}
+      LISTMONK_upload__s3__aws_access_key_id: ${LISTMONK_upload__s3__aws_access_key_id:-}
+      LISTMONK_upload__s3__aws_secret_access_key: ${LISTMONK_upload__s3__aws_secret_access_key:-}
+      LISTMONK_upload__s3__aws_default_region: ${LISTMONK_upload__s3__aws_default_region:-}
+      LISTMONK_upload__s3__bucket: ${LISTMONK_upload__s3__bucket:-}
+      LISTMONK_upload__s3__bucket_path: ${LISTMONK_upload__s3__bucket_path:-/}
+      LISTMONK_upload__s3__bucket_type: ${LISTMONK_upload__s3__bucket_type:-public}
+      LISTMONK_upload__s3__url: ${LISTMONK_upload__s3__url:-}
+      LISTMONK_upload__s3__public_url: ${LISTMONK_upload__s3__public_url:-}
+      LISTMONK_upload__s3__expiry: ${LISTMONK_upload__s3__expiry:-167h}
+      LISTMONK_upload__extensions: ${LISTMONK_upload__extensions:-jpg,jpeg,png,gif,svg,pdf,zip}
+    volumes:
+      - ./uploads:/listmonk/uploads:rw                        # Mount an uploads directory on the host to /listmonk/uploads inside the container.
+                                                              # To use this, change directory path in Admin -> Settings -> Media to /listmonk/uploads
+
+
+
+networks:
+  listmonk:
+
